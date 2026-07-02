@@ -175,6 +175,8 @@
   <div class="row">Flip vertical (lens/mirror) <div class="tog" id="t_flipv"></div></div>
   <div class="row">Ceiling mode (bright, full-screen) <div class="tog" id="t_ceiling"></div></div>
   <div class="row">Brightness <input type="range" id="r_bright" min="1" max="2.8" step="0.1"></div>
+  <button class="loc" id="b_lensbox" style="margin-top:6px">&#128269; Lens-box preset</button>
+  <div class="note">One tap for the shoebox-magnifier setup: rotates the image 180&deg; to pre-cancel the lens flip and switches Ceiling mode on. A single lens rotates the picture but doesn&#39;t mirror it, so Mirror stays off — fine-tune with Rotate if your box sits at an angle.</div>
   <div class="note">For projecting onto a ceiling: turn on Ceiling mode, then use Rotate / Mirror / Flip to line the planets up with how your mirror or lens throws the image. Brightness drives the ceiling-mode contrast.</div>
 </div>
 
@@ -498,13 +500,15 @@ function renderOverYou(){
 }
 function updateReadout(){
   const d=new Date(simMs);
-  $("r_date").textContent=d.getUTCDate()+" "+MON[d.getUTCMonth()]+" "+d.getUTCFullYear();
+  const hh=String(d.getHours()).padStart(2,"0"),mm=String(d.getMinutes()).padStart(2,"0");
+  $("r_date").textContent=d.getDate()+" "+MON[d.getMonth()]+" "+d.getFullYear()+" · "+hh+":"+mm;
   $("r_rate").textContent=rateLabel();
   if(sel&&pos[sel]){const h=pos[sel];let s=sel+" — "+h.r.toFixed(2)+" AU from the Sun";
     if(h.alt!=null)s+=h.alt>0?" · "+Math.round(h.alt)+"° above you":" · below horizon";
     $("r_sel").textContent=s;}
   else $("r_sel").textContent="";
   if((oyTick++ %12)===0){renderOverYou();
+    $("rate_lbl").textContent="Currently: "+rateLabel();
     const mp=moonPhase(jdOf(simMs));
     $("m_icon").innerHTML=moonSVG(16,mp.illum,mp.waxing);
     $("m_txt").innerHTML="<b>"+mp.name+"</b> · "+Math.round(mp.illum*100)+"% lit";
@@ -525,12 +529,14 @@ function zoomAt(f,mx,my){
 cv.addEventListener("wheel",e=>{e.preventDefault();let dy=e.deltaY;if(e.deltaMode===1)dy*=16;else if(e.deltaMode===2)dy*=H;
   dy=clamp(dy,-60,60);zoomAt(Math.exp(-dy*0.0016),e.clientX,e.clientY);$("hint").style.opacity="0";},{passive:false});
 
-let drag=null,moved=false;
-cv.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,px:cfg.px,py:cfg.py};moved=false;cv.setPointerCapture(e.pointerId);});
-cv.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+let drag=null,moved=false,activePtrs=new Set();
+cv.addEventListener("pointerdown",e=>{activePtrs.add(e.pointerId);
+  if(activePtrs.size>1){drag=null;return;}
+  drag={x:e.clientX,y:e.clientY,px:cfg.px,py:cfg.py};moved=false;cv.setPointerCapture(e.pointerId);});
+cv.addEventListener("pointermove",e=>{if(!drag||activePtrs.size>1)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
   if(Math.abs(dx)+Math.abs(dy)>4)moved=true;cfg.px=drag.px+dx;cfg.py=drag.py+dy;});
-cv.addEventListener("pointerup",e=>{if(drag&&!moved)tapAt(e.clientX,e.clientY);drag=null;});
-cv.addEventListener("pointercancel",()=>{drag=null;});
+cv.addEventListener("pointerup",e=>{activePtrs.delete(e.pointerId);if(drag&&!moved)tapAt(e.clientX,e.clientY);drag=null;});
+cv.addEventListener("pointercancel",e=>{activePtrs.delete(e.pointerId);drag=null;});
 
 /* pinch */
 let pinch=0;
@@ -543,9 +549,10 @@ cv.addEventListener("touchend",e=>{if(e.touches.length<2)pinch=0;});
 
 let sel=null;
 function tapAt(mx,my){
-  let best=null,bd=26;
+  let best=null,bd=Infinity;
   for(const p of PLANETS){const h=pos[p.n];if(!h)continue;const[x,y]=project(h.x,h.y);
-    const d=Math.hypot(mx-x,my-y);if(d<Math.max(bd,p.s+12)&&d<bd+p.s){bd=d;best=p.n;}}
+    const d=Math.hypot(mx-x,my-y),hit=Math.max(18,p.s+12);
+    if(d<hit&&d<bd){bd=d;best=p.n;}}
   sel=(best===sel)?null:best;
 }
 
@@ -603,6 +610,11 @@ async function setCeiling(on){cfg.ceiling=on;store.set("ceiling",on);document.bo
   if(on){try{document.documentElement.requestFullscreen&&await document.documentElement.requestFullscreen();}catch(_){}acquireWake();}
   else{try{if(document.fullscreenElement)await document.exitFullscreen();}catch(_){}try{if(wakeLock){wakeLock.release();wakeLock=null;}}catch(_){}}}
 $("t_ceiling").onclick=()=>setCeiling(!cfg.ceiling);
+$("b_lensbox").onclick=()=>{
+  cfg.rotation=180;store.set("rotation",180);
+  cfg.mirror=false;store.set("mirror",false);
+  cfg.flipV=false;store.set("flipV",false);
+  syncUI();setCeiling(true);};
 document.addEventListener("visibilitychange",()=>{if(cfg.ceiling&&document.visibilityState==="visible")acquireWake();});
 
 /* ---------- go ---------- */
